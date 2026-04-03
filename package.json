@@ -1,0 +1,40 @@
+{
+  "name": "auto-api-discovery",
+  "version": "1.0.2",
+  "description": "API discovery automation CLI",
+  "main": "dist/index.js",
+  "bin": {
+    "apigen": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "ts-node src/index.ts",
+    "test": "tsc --noEmit",
+    "prepublishOnly": "npm run build",
+    "postinstall": "playwright install chromium"
+  },
+  "keywords": [
+    "api",
+    "openapi",
+    "cli",
+    "playwright",
+    "automation"
+  ],
+  "author": "Anooj Shete",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^9.4.0",
+    "chalk": "^4.1.2",
+    "commander": "^12.0.0",
+    "playwright": "^1.42.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.9",
+    "@types/node": "^20.11.24",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}

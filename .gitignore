@@ -1,0 +1,44 @@
+# Dependency directories
+node_modules/
+
+# TypeScript compilation output
+dist/
+build/
+
+# Local Database (CRITICAL: Do not commit SQLite binaries)
+apigen.db
+apigen.db-journal
+apigen.db-wal
+apigen.db-shm
+
+# Captured Sessions & Credentials (CRITICAL: Contains live cookies/JWTs)
+session.json
+.env
+
+# Generated Output Files
+*.schema.json
+openapi.json
+myschema.json
+
+# Playwright specific
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.apigen-session.json
