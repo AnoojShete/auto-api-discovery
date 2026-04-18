@@ -1,6 +1,6 @@
 {
   "name": "auto-api-discovery",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "description": "API discovery automation CLI",
   "main": "dist/index.js",
   "bin": {
