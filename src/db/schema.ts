@@ -19,7 +19,7 @@ import fs from 'fs';
 let _db: Database.Database | null = null;
 
 /** Resolve the .apigen directory and ensure it exists */
-function getApigenDir(): string {
+export function getApigenDir(): string {
   const dir = path.resolve(process.cwd(), '.apigen');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -176,6 +176,42 @@ const MIGRATIONS: { name: string; sql: string }[] = [
         request_id   TEXT REFERENCES requests(id),
         endpoint_id  TEXT REFERENCES endpoints(id),
         PRIMARY KEY (request_id, endpoint_id)
+      );
+    `,
+  },
+  {
+    name: '002_observability_and_storage',
+    sql: `
+      ALTER TABLE requests ADD COLUMN request_body_path TEXT;
+      ALTER TABLE requests ADD COLUMN response_body_path TEXT;
+      ALTER TABLE requests ADD COLUMN request_body_size INTEGER;
+      ALTER TABLE requests ADD COLUMN response_body_size INTEGER;
+      ALTER TABLE requests ADD COLUMN trace_id TEXT;
+
+      ALTER TABLE endpoints ADD COLUMN provenance TEXT DEFAULT 'network';
+      UPDATE endpoints SET provenance = 'network' WHERE provenance IS NULL;
+
+      CREATE TABLE IF NOT EXISTS telemetry_drops (
+        id           TEXT PRIMARY KEY,
+        captured_at  INTEGER NOT NULL,
+        url          TEXT NOT NULL,
+        reason       TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS parser_diagnostics (
+        id           TEXT PRIMARY KEY,
+        captured_at  INTEGER NOT NULL,
+        kind         TEXT NOT NULL,
+        url          TEXT,
+        message      TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS replay_events (
+        id           TEXT PRIMARY KEY,
+        captured_at  INTEGER NOT NULL,
+        request_id   TEXT,
+        success      INTEGER NOT NULL,
+        status_code  INTEGER
       );
     `,
   },

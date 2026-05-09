@@ -20,6 +20,7 @@ import { getDb } from '../db/schema';
 import { getAllEndpoints, EndpointRecord } from '../db/endpoints';
 import { extractPathParams } from '../schema/path-folder';
 import { inferSchema, mergeSchemas, JSONSchemaFragment } from '../schema/infer';
+import { readTextObject } from '../storage/object-store';
 
 export interface ExportOptions {
   baseUrl: string;
@@ -92,10 +93,10 @@ function getResponseSchemas(endpointId: string): Record<number, JSONSchemaFragme
 
   // Fallback: infer from raw requests
   const requests = db.prepare(`
-    SELECT r.response_status, r.response_body
+    SELECT r.response_status, r.response_body, r.response_body_path
     FROM requests r
     JOIN request_endpoint_map rem ON r.id = rem.request_id
-    WHERE rem.endpoint_id = ? AND r.response_body IS NOT NULL
+    WHERE rem.endpoint_id = ? AND (r.response_body IS NOT NULL OR r.response_body_path IS NOT NULL)
   `).all(endpointId) as any[];
 
   const schemasByStatus: Record<number, JSONSchemaFragment[]> = {};
@@ -104,11 +105,16 @@ function getResponseSchemas(endpointId: string): Record<number, JSONSchemaFragme
     const status = req.response_status;
     if (!status) continue;
 
+    let rawBody: any = req.response_body;
+    if (!rawBody && req.response_body_path) {
+      rawBody = readTextObject(req.response_body_path);
+    }
+
     let body: any;
     try {
-      body = typeof req.response_body === 'string'
-        ? JSON.parse(req.response_body)
-        : req.response_body;
+      body = typeof rawBody === 'string'
+        ? JSON.parse(rawBody)
+        : rawBody;
     } catch {
       continue;
     }
@@ -191,7 +197,7 @@ export function generateOpenAPISpec(options: ExportOptions): object {
           ? { 'x-apigen-low-confidence': true, 'x-apigen-observations': ep.observation_count }
           : {}
         ),
-        'x-apigen-source': 'network',
+        'x-apigen-source': ep.provenance || 'network',
       } as OperationObject;
 
       // Add path params

@@ -8,28 +8,24 @@
 
 import { Page, Response } from 'playwright';
 import chalk from 'chalk';
+import { randomUUID } from 'crypto';
 import { insertRequest } from '../db/requests';
 import { upsertEndpoint, linkRequestToEndpoint } from '../db/endpoints';
 import { foldPath } from '../schema/path-folder';
+import { storeTextObject } from '../storage/object-store';
+import { logEvent } from '../observability/logger';
+import { shouldDropTelemetry, FilterOptions } from './telemetry-filter';
+import { recordTelemetryDrop } from '../db/telemetry';
+import { recordParseDiagnostic } from '../db/diagnostics';
 
 /** Resource types we care about */
 const API_RESOURCE_TYPES = new Set(['xhr', 'fetch']);
 
-/** Known noise domains to skip */
-const NOISE_PATTERNS = [
-  'google-analytics.com',
-  'googletagmanager.com',
-  'facebook.com/tr',
-  'doubleclick.net',
-  'hotjar.com',
-  'segment.io',
-  'sentry.io',
-  'cdn.amplitude.com',
-  'mixpanel.com',
-];
-
 /** Static asset extensions to skip */
 const ASSET_REGEX = /\.(png|jpg|jpeg|gif|webp|css|woff2?|woff|ttf|eot|js|ico|svg|map)$/i;
+
+const BODY_STORE_THRESHOLD_BYTES = 64 * 1024;
+const MAX_BODY_BYTES = 1024 * 1024;
 
 /**
  * Check if a response is an API call we should capture.
@@ -37,9 +33,6 @@ const ASSET_REGEX = /\.(png|jpg|jpeg|gif|webp|css|woff2?|woff|ttf|eot|js|ico|svg
 function isApiRequest(url: string, resourceType: string): boolean {
   // Only capture fetch/XHR
   if (!API_RESOURCE_TYPES.has(resourceType)) return false;
-
-  // Skip known noise domains
-  if (NOISE_PATTERNS.some(p => url.includes(p))) return false;
 
   // Skip static assets
   if (ASSET_REGEX.test(url)) return false;
@@ -51,38 +44,45 @@ function isApiRequest(url: string, resourceType: string): boolean {
  * Safely read response body. Can throw on binary/streaming responses — returns null on failure.
  * Caps body read at 500KB to prevent memory issues.
  */
-async function safeBody(response: Response): Promise<string | null> {
+async function safeBody(response: Response): Promise<{ text: string | null; size: number; truncated: boolean }> {
   try {
     const contentType = response.headers()['content-type'] || '';
 
     // Only attempt to read JSON or text responses
     if (!contentType.includes('application/json') && !contentType.includes('text/')) {
-      return null;
+      return { text: null, size: 0, truncated: false };
     }
 
     const buffer = await response.body();
-
-    // Cap at 500KB
-    if (buffer.length > 512 * 1024) {
-      return buffer.slice(0, 512 * 1024).toString('utf-8');
-    }
-
-    return buffer.toString('utf-8');
+    const truncated = buffer.length > MAX_BODY_BYTES;
+    const safeBuffer = truncated ? buffer.slice(0, MAX_BODY_BYTES) : buffer;
+    return { text: safeBuffer.toString('utf-8'), size: buffer.length, truncated };
   } catch {
-    return null;
+    return { text: null, size: 0, truncated: false };
   }
 }
 
 /**
  * Parse a string body into JSON if possible.
  */
-function tryParseJson(str: string | null): any {
+function tryParseJson(str: string | null, kind: 'request_body' | 'response_body', url: string): any {
   if (!str) return null;
   try {
     return JSON.parse(str);
-  } catch {
+  } catch (err: any) {
+    recordParseDiagnostic(kind, url, err?.message || 'json_parse_failed');
     return str;
   }
+}
+
+function getFilterOptions(): FilterOptions {
+  const allowSameOrigin = process.env.APIGEN_ALLOW_SAME_ORIGIN === '1';
+  const allowPathsRaw = process.env.APIGEN_ALLOW_PATH_PREFIXES || '';
+  const allowPathPrefixes = allowPathsRaw
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  return { allowSameOrigin, allowPathPrefixes };
 }
 
 export interface InterceptorOptions {
@@ -111,10 +111,17 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
   const { sessionId, quiet = false, onCapture } = options;
 
   // Cache requests so we can correlate with responses
-  const requestTimestamps = new Map<string, number>();
+  const requestTimestamps = new Map<string, { start: number; traceId: string }>();
+  const filterOptions = getFilterOptions();
 
   page.on('request', (req) => {
-    requestTimestamps.set(req.url() + req.method(), Date.now());
+    const traceId = randomUUID();
+    requestTimestamps.set(req.url() + req.method(), { start: Date.now(), traceId });
+    logEvent('request.start', {
+      trace_id: traceId,
+      method: req.method(),
+      url: req.url(),
+    });
   });
 
   page.on('response', async (response: Response) => {
@@ -127,20 +134,32 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
     if (method === 'OPTIONS') return;
     if (!isApiRequest(url, resourceType)) return;
 
+    const origin = request.frame()?.url() || undefined;
+    const telemetryDecision = shouldDropTelemetry(url, filterOptions, origin);
+    if (telemetryDecision.drop) {
+      recordTelemetryDrop(url, telemetryDecision.reason);
+      logEvent('telemetry.drop', { url, reason: telemetryDecision.reason });
+      return;
+    }
+
     try {
       const status = response.status();
       const reqHeaders = request.headers();
       const resHeaders = response.headers();
 
       // Read bodies safely
-      const postData = request.postData();
-      const reqBody = tryParseJson(postData);
-      const resBodyStr = await safeBody(response);
-      const resBody = tryParseJson(resBodyStr);
+      const postData = request.postData() || null;
+      const reqBody = tryParseJson(postData, 'request_body', url);
+      const resBodyResult = await safeBody(response);
+      if (resBodyResult.truncated) {
+        logEvent('body.truncated', { url, size: resBodyResult.size, max_bytes: MAX_BODY_BYTES });
+      }
+      const resBody = tryParseJson(resBodyResult.text, 'response_body', url);
 
       // Calculate response time
-      const startTime = requestTimestamps.get(url + method);
-      const responseTime = startTime ? Date.now() - startTime : null;
+      const traceInfo = requestTimestamps.get(url + method);
+      const responseTime = traceInfo ? Date.now() - traceInfo.start : null;
+      const traceId = traceInfo?.traceId ?? randomUUID();
       requestTimestamps.delete(url + method);
 
       // Parse URL parts
@@ -158,6 +177,21 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
       const pathTemplate = foldPath(parsedPath);
 
       // Insert into requests table (content-addressed dedup)
+      const requestBodySize = postData ? Buffer.byteLength(postData, 'utf-8') : null;
+      const responseBodySize = resBodyResult.size || null;
+      let requestBodyPath: string | null = null;
+      let responseBodyPath: string | null = null;
+
+      if (postData && requestBodySize !== null && requestBodySize > BODY_STORE_THRESHOLD_BYTES) {
+        const stored = storeTextObject('req', postData);
+        requestBodyPath = stored.path;
+      }
+
+      if (resBodyResult.text && responseBodySize !== null && responseBodySize > BODY_STORE_THRESHOLD_BYTES) {
+        const stored = storeTextObject('res', resBodyResult.text);
+        responseBodyPath = stored.path;
+      }
+
       const requestId = insertRequest({
         session_id: sessionId,
         method,
@@ -165,16 +199,21 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
         path: parsedPath,
         query_raw: queryRaw,
         request_headers: reqHeaders,
-        request_body: reqBody,
+        request_body: requestBodyPath ? null : reqBody,
+        request_body_path: requestBodyPath,
+        request_body_size: requestBodySize,
         response_status: status,
         response_headers: resHeaders,
-        response_body: resBody,
+        response_body: responseBodyPath ? null : resBody,
+        response_body_path: responseBodyPath,
+        response_body_size: responseBodySize,
         response_time_ms: responseTime,
         source: resourceType,
+        trace_id: traceId,
       });
 
       // Upsert endpoint (deduplicated by method + template + base_url)
-      const endpointId = upsertEndpoint(method, pathTemplate, baseUrl);
+      const endpointId = upsertEndpoint(method, pathTemplate, baseUrl, 'network');
 
       // Link request → endpoint
       linkRequestToEndpoint(requestId, endpointId);
@@ -187,6 +226,16 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
         );
       }
 
+      logEvent('request.response', {
+        trace_id: traceId,
+        method,
+        url,
+        status,
+        response_time_ms: responseTime,
+        request_body_size: requestBodySize,
+        response_body_size: responseBodySize,
+      });
+
       // Callback
       if (onCapture) {
         onCapture({ requestId, endpointId, method, url, pathTemplate, status });
@@ -195,6 +244,7 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
       if (!quiet) {
         console.error(chalk.red('[Interceptor Error]'), err);
       }
+      logEvent('request.error', { message: (err as any)?.message || 'unknown_error' }, 'error');
     }
   });
 }

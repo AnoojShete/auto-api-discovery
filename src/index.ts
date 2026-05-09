@@ -22,6 +22,7 @@ import { registerExportCommand } from './cli/export';
 import { registerStatsCommand } from './cli/stats';
 import { registerSessionsCommand } from './cli/sessions';
 import { registerResetCommand } from './cli/reset';
+import { registerMetricsCommand } from './cli/metrics';
 
 const program = new Command();
 
@@ -37,5 +38,6 @@ registerExportCommand(program);
 registerStatsCommand(program);
 registerSessionsCommand(program);
 registerResetCommand(program);
+registerMetricsCommand(program);
 
 program.parse(process.argv);

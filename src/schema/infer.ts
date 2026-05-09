@@ -1,3 +1,5 @@
+import { logEvent } from '../observability/logger';
+
 /**
  * JSON Schema inference engine (Phase 1 / L6 foundation).
  * 
@@ -116,10 +118,21 @@ export function mergeSchemas(a: JSONSchemaFragment, b: JSONSchemaFragment): JSON
     // Same primitive type — keep format if both agree
     if (a.format === b.format) return { ...a };
     // Different formats on same type — drop format
+    logEvent('schema.merge', {
+      reason: 'format_conflict',
+      type: a.type,
+      format_a: a.format,
+      format_b: b.format,
+    });
     return { type: a.type };
   }
 
   // Different types — emit oneOf
+  logEvent('schema.merge', {
+    reason: 'type_conflict',
+    type_a: a.type,
+    type_b: b.type,
+  });
   return {
     oneOf: [a, b],
   };

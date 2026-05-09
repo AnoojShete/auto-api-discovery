@@ -11,6 +11,7 @@ export interface EndpointRecord {
   method: string;
   path_template: string;
   base_url: string;
+  provenance?: string | null;
   tag?: string | null;
   status?: string;
   deprecated?: boolean;
@@ -34,7 +35,8 @@ export function computeEndpointId(method: string, pathTemplate: string, baseUrl:
 export function upsertEndpoint(
   method: string,
   pathTemplate: string,
-  baseUrl: string
+  baseUrl: string,
+  provenance: string = 'network'
 ): string {
   const db = getDb();
   const id = computeEndpointId(method, pathTemplate, baseUrl);
@@ -50,9 +52,9 @@ export function upsertEndpoint(
     `).run(now, id);
   } else {
     db.prepare(`
-      INSERT INTO endpoints (id, method, path_template, base_url, first_seen_at, last_seen_at, observation_count)
-      VALUES (?, ?, ?, ?, ?, ?, 1)
-    `).run(id, method, pathTemplate, baseUrl, now, now);
+      INSERT INTO endpoints (id, method, path_template, base_url, provenance, first_seen_at, last_seen_at, observation_count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+    `).run(id, method, pathTemplate, baseUrl, provenance, now, now);
   }
 
   return id;
