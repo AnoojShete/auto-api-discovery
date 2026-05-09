@@ -278,4 +278,47 @@ const MIGRATIONS: { name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_sse_events_stream ON sse_events(stream_id);
     `,
   },
+  {
+    name: '004_gql_ast_metadata',
+    sql: `
+      ALTER TABLE gql_operations ADD COLUMN complexity INTEGER DEFAULT 0;
+      ALTER TABLE gql_operations ADD COLUMN has_fragments INTEGER DEFAULT 0;
+      ALTER TABLE gql_operations ADD COLUMN is_persisted_query INTEGER DEFAULT 0;
+      ALTER TABLE gql_operations ADD COLUMN fragments TEXT;
+    `,
+  },
+  {
+    name: '005_replay_subsystem',
+    sql: `
+      DROP TABLE IF EXISTS replay_events;
+
+      CREATE TABLE IF NOT EXISTS replay_jobs (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'queued',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS replay_events (
+        id TEXT PRIMARY KEY,
+        job_id TEXT REFERENCES replay_jobs(id),
+        original_request_id TEXT REFERENCES requests(id),
+        replay_request_id TEXT,
+        status_code INTEGER,
+        success INTEGER NOT NULL,
+        latency_ms INTEGER,
+        captured_at INTEGER NOT NULL,
+        provenance TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS replay_dependencies (
+        id TEXT PRIMARY KEY,
+        source_request_id TEXT REFERENCES requests(id),
+        target_request_id TEXT REFERENCES requests(id),
+        dependency_type TEXT NOT NULL,
+        confidence REAL DEFAULT 1.0,
+        evidence TEXT
+      );
+    `,
+  },
 ];

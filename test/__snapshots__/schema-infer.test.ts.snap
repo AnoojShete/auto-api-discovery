@@ -1,0 +1,37 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`schema inference > infers and merges schemas consistently 1`] = `
+{
+  "properties": {
+    "active": {
+      "type": "boolean",
+    },
+    "email": {
+      "format": "email",
+      "type": "string",
+    },
+    "id": {
+      "oneOf": [
+        {
+          "type": "integer",
+        },
+        {
+          "type": "string",
+        },
+      ],
+    },
+    "tags": {
+      "items": {
+        "type": "string",
+      },
+      "type": "array",
+    },
+  },
+  "required": [
+    "id",
+    "email",
+    "active",
+  ],
+  "type": "object",
+}
+`;

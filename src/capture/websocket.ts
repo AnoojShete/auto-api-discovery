@@ -170,8 +170,8 @@ function handleFrame(
         // ── GraphQL subscription detection ───────────────────
         if (isGqlSubscription(parsed)) {
           const gqlPayload = parsed.payload;
-          const op = extractGqlOperation(gqlPayload);
-          if (op) {
+          const gqlOps = extractGqlOperation(gqlPayload, wsUrl);
+          for (const op of gqlOps) {
             op.operationType = op.operationType || 'subscription';
             upsertGqlOperation(op, sessionId, wsUrl, 'ws');
           }

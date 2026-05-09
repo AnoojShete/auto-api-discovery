@@ -221,9 +221,9 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
 
       // GraphQL detection: index operations in gql_operations table
       if (reqBody && typeof reqBody === 'object' && isGraphQLRequest(parsedPath, reqBody)) {
-        const gqlOp = extractGqlOperation(reqBody);
-        if (gqlOp) {
-          upsertGqlOperation(gqlOp, sessionId, url, 'network');
+        const gqlOps = extractGqlOperation(reqBody, url);
+        for (const op of gqlOps) {
+          upsertGqlOperation(op, sessionId, url, 'network');
         }
       }
 

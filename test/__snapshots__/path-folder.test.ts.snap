@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`foldPath > folds dynamic segments with semantic names 1`] = `
+[
+  "/users/{userId}",
+  "/users/{userId}/posts/abc123",
+  "/teams/{teamId}/roles/{roleId}",
+  "/projects/alpha/tasks/{taskId}",
+  "/orgs/acme/users/{userId}",
+]
+`;
