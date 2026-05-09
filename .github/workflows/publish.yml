@@ -29,6 +29,9 @@ jobs:
       - name: Install Playwright
         run: npx playwright install chromium
 
+      - name: Run Type Checking
+        run: npm run test:types
+
       - name: Run Tests
         run: npm test
 
@@ -39,7 +42,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          npm version patch -m "chore: bump version to %s [skip ci]"
+          npm version patch -m "chore: Phase 3 Replay inference — bump version to %s [skip ci]"
           git push origin main
 
       - name: Publish to NPM Registry
