@@ -23,6 +23,10 @@ export function registerStatsCommand(program: Command): void {
         console.log(`  Schemas:         ${chalk.green(count('schemas'))}`);
         console.log(`  Sessions:        ${chalk.green(count('sessions'))}`);
         console.log(`  GraphQL Ops:     ${chalk.green(count('gql_operations'))}`);
+        console.log(`  WS Sessions:     ${chalk.green(count('ws_sessions'))}`);
+        console.log(`  WS Frames:       ${chalk.green(count('ws_frames'))}`);
+        console.log(`  SSE Streams:     ${chalk.green(count('sse_streams'))}`);
+        console.log(`  SSE Events:      ${chalk.green(count('sse_events'))}`);
         console.log(`  Bundle Findings: ${chalk.green(count('bundle_findings'))}`);
         console.log(`  Corrections:     ${chalk.green(count('corrections'))}`);
 

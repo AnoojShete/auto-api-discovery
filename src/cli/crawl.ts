@@ -9,6 +9,9 @@ import { Command } from 'commander';
 import { chromium, Browser } from 'playwright';
 import chalk from 'chalk';
 import { attachInterceptor } from '../capture/interceptor';
+import { attachWebSocketCapture, getWsSessionCount, getWsFrameCount } from '../capture/websocket';
+import { attachSseCapture, getSseStreamCount } from '../capture/sse';
+import { getGqlOperationCount } from '../capture/graphql';
 import { createSession, getSessionByLabel, updateSessionCookies } from '../db/sessions';
 import { getRequestCount } from '../db/requests';
 
@@ -62,8 +65,10 @@ export function registerCrawlCommand(program: Command): void {
         // Create a new session for this crawl
         const sessionId = createSession(options.saveSession || `crawl-${Date.now()}`);
 
-        // Attach interceptor
+        // Attach interceptor + WS/SSE capture
         attachInterceptor(page, { sessionId, quiet: false });
+        attachWebSocketCapture(page, { sessionId });
+        attachSseCapture(page, { sessionId });
 
         // Parse target URL
         let parsedTargetUrl: URL;
@@ -142,9 +147,16 @@ export function registerCrawlCommand(program: Command): void {
 
         // Stats
         const requestCount = getRequestCount();
+        const wsCount = getWsSessionCount();
+        const wsFrames = getWsFrameCount();
+        const gqlCount = getGqlOperationCount();
+        const sseCount = getSseStreamCount();
         console.log(chalk.bold.green(`\n  ✓ Crawl complete!`));
         console.log(chalk.gray(`    Pages processed:   ${pagesProcessed}`));
-        console.log(chalk.gray(`    Total requests:    ${requestCount}`));
+        console.log(chalk.gray(`    HTTP requests:     ${requestCount}`));
+        if (wsCount > 0)  console.log(chalk.gray(`    WS sessions:       ${wsCount} (${wsFrames} frames)`));
+        if (gqlCount > 0) console.log(chalk.gray(`    GraphQL ops:       ${gqlCount}`));
+        if (sseCount > 0) console.log(chalk.gray(`    SSE streams:       ${sseCount}`));
         console.log(chalk.gray(`    Database: .apigen/db.sqlite\n`));
 
       } catch (error) {

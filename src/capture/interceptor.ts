@@ -17,6 +17,7 @@ import { logEvent } from '../observability/logger';
 import { shouldDropTelemetry, FilterOptions } from './telemetry-filter';
 import { recordTelemetryDrop } from '../db/telemetry';
 import { recordParseDiagnostic } from '../db/diagnostics';
+import { isGraphQLRequest, extractGqlOperation, upsertGqlOperation } from './graphql';
 
 /** Resource types we care about */
 const API_RESOURCE_TYPES = new Set(['xhr', 'fetch']);
@@ -217,6 +218,14 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
 
       // Link request → endpoint
       linkRequestToEndpoint(requestId, endpointId);
+
+      // GraphQL detection: index operations in gql_operations table
+      if (reqBody && typeof reqBody === 'object' && isGraphQLRequest(parsedPath, reqBody)) {
+        const gqlOp = extractGqlOperation(reqBody);
+        if (gqlOp) {
+          upsertGqlOperation(gqlOp, sessionId, url, 'network');
+        }
+      }
 
       // Console output
       if (!quiet) {

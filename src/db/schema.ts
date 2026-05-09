@@ -215,4 +215,67 @@ const MIGRATIONS: { name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    name: '003_phase2_ws_gql_sse',
+    sql: `
+      -- WebSocket session tracking
+      CREATE TABLE IF NOT EXISTS ws_sessions (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        url          TEXT NOT NULL,
+        opened_at    INTEGER NOT NULL,
+        closed_at    INTEGER,
+        frame_count  INTEGER DEFAULT 0,
+        status       TEXT DEFAULT 'open'
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ws_sessions_session ON ws_sessions(session_id);
+
+      -- WebSocket frame log
+      CREATE TABLE IF NOT EXISTS ws_frames (
+        id              TEXT PRIMARY KEY,
+        ws_session_id   TEXT REFERENCES ws_sessions(id),
+        direction       TEXT NOT NULL,
+        captured_at     INTEGER NOT NULL,
+        payload_text    TEXT,
+        payload_binary  TEXT,
+        payload_size    INTEGER NOT NULL DEFAULT 0,
+        is_json         INTEGER DEFAULT 0,
+        message_type    TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_ws_frames_session ON ws_frames(ws_session_id);
+
+      -- Extend gql_operations with endpoint URL, timestamp, introspection status
+      ALTER TABLE gql_operations ADD COLUMN endpoint_url TEXT;
+      ALTER TABLE gql_operations ADD COLUMN captured_at INTEGER;
+      ALTER TABLE gql_operations ADD COLUMN introspection_status TEXT;
+
+      -- SSE stream tracking
+      CREATE TABLE IF NOT EXISTS sse_streams (
+        id           TEXT PRIMARY KEY,
+        session_id   TEXT NOT NULL,
+        url          TEXT NOT NULL,
+        started_at   INTEGER NOT NULL,
+        ended_at     INTEGER,
+        event_count  INTEGER DEFAULT 0,
+        byte_count   INTEGER DEFAULT 0,
+        truncated    INTEGER DEFAULT 0
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sse_streams_session ON sse_streams(session_id);
+
+      -- SSE individual events
+      CREATE TABLE IF NOT EXISTS sse_events (
+        id           TEXT PRIMARY KEY,
+        stream_id    TEXT REFERENCES sse_streams(id),
+        captured_at  INTEGER NOT NULL,
+        event_type   TEXT,
+        data         TEXT NOT NULL,
+        event_id     TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_sse_events_stream ON sse_events(stream_id);
+    `,
+  },
 ];

@@ -11,8 +11,13 @@ import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
 import { attachInterceptor } from '../capture/interceptor';
+import { attachWebSocketCapture } from '../capture/websocket';
+import { attachSseCapture } from '../capture/sse';
 import { createSession, updateSessionCookies } from '../db/sessions';
 import { getRequestCount } from '../db/requests';
+import { getWsSessionCount, getWsFrameCount } from '../capture/websocket';
+import { getGqlOperationCount } from '../capture/graphql';
+import { getSseStreamCount } from '../capture/sse';
 
 export function registerCaptureCommand(program: Command): void {
   program
@@ -43,6 +48,12 @@ export function registerCaptureCommand(program: Command): void {
           },
         });
 
+        // Attach WebSocket capture
+        attachWebSocketCapture(page, { sessionId });
+
+        // Attach SSE capture
+        attachSseCapture(page, { sessionId });
+
         // Navigate
         await page.goto(url, { waitUntil: 'domcontentloaded' });
 
@@ -55,8 +66,15 @@ export function registerCaptureCommand(program: Command): void {
 
           // Show final stats
           const count = getRequestCount();
+          const wsCount = getWsSessionCount();
+          const wsFrames = getWsFrameCount();
+          const gqlCount = getGqlOperationCount();
+          const sseCount = getSseStreamCount();
           console.log(chalk.bold.green(`\n  ✓ Capture complete!`));
-          console.log(chalk.gray(`    Requests captured: ${count}`));
+          console.log(chalk.gray(`    HTTP requests:    ${count}`));
+          if (wsCount > 0)  console.log(chalk.gray(`    WS sessions:      ${wsCount} (${wsFrames} frames)`));
+          if (gqlCount > 0) console.log(chalk.gray(`    GraphQL ops:      ${gqlCount}`));
+          if (sseCount > 0) console.log(chalk.gray(`    SSE streams:      ${sseCount}`));
 
           if (options.saveSession) {
             console.log(chalk.gray(`    Session saved as: "${options.saveSession}"`));
