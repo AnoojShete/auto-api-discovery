@@ -1,7 +1,7 @@
 {
   "name": "auto-api-discovery",
-  "version": "1.0.7",
-  "description": "API discovery automation CLI",
+  "version": "2.0.0",
+  "description": "Hybrid API discovery — intercept, infer, and reconstruct OpenAPI specs",
   "main": "dist/index.js",
   "bin": {
     "apigen": "./dist/index.js"
@@ -26,9 +26,12 @@
   "author": "Anooj Shete",
   "license": "MIT",
   "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "better-sqlite3": "^12.8.0",
     "chalk": "^4.1.2",
     "commander": "^12.0.0",
+    "openapi3-ts": "^4.5.0",
     "playwright": "^1.42.1"
   },
   "devDependencies": {
