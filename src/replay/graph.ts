@@ -1,6 +1,6 @@
 import { ReplayProvenance } from './models';
 
-export type GraphNodeType = 'request' | 'auth' | 'workflow' | 'graphql_operation';
+export type GraphNodeType = 'request' | 'auth' | 'workflow' | 'graphql_operation' | 'websocket';
 
 export interface GraphNode {
   id: string;
