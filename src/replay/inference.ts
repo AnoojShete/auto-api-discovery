@@ -1,7 +1,8 @@
 import { getDb } from '../db/schema';
 import { addReplayDependency } from './models';
-import { recordReplayDiagnostic } from './metrics';
+import { recordReplayDiagnostic, recordIndexedInferenceMetrics } from './metrics';
 import { classifyToken } from './classify';
+import { DependencyIndexer } from './index';
 
 // ────────────────────────────────────────────────────────────────
 // Types
@@ -53,144 +54,76 @@ function getHeaderValue(headers: any, key: string): string | null {
 }
 
 // ────────────────────────────────────────────────────────────────
-// Heuristic Functions
+// Target & Source Extraction
 // ────────────────────────────────────────────────────────────────
 
-function inferAuthToken(source: any, target: any, deps: InferredDependency[]) {
-  const targetAuth = getHeaderValue(target.request_headers, 'authorization');
-  if (!targetAuth || !targetAuth.toLowerCase().startsWith('bearer ')) return;
-
-  const token = targetAuth.substring(7).trim();
-  if (token.length < 10) return;
-
-  const sourceBodyTokens = extractPotentialTokens(source.response_body, 'body');
-  for (const t of sourceBodyTokens) {
-    if (t.value === token) {
-      const cls = classifyToken(token, 'authorization');
-      let baseConf = 0.95;
-      deps.push({
-        sourceRequestId: source.id,
-        targetRequestId: target.id,
-        type: 'token',
-        confidence: Math.max(0.0, Math.min(1.0, baseConf + cls.confidence_modifier)),
-        evidence: { match_type: 'body_to_header', source_path: t.path, target_header: 'Authorization', classification: cls }
-      });
-      return;
-    }
+function extractSourceTokens(source: any): Array<{ value: string; path: string; type: 'body' | 'header' }> {
+  const tokens: Array<{ value: string; path: string; type: 'body' | 'header' }> = [];
+  
+  const bodyTokens = extractPotentialTokens(source.response_body, 'body');
+  for (const t of bodyTokens) {
+    tokens.push({ value: t.value, path: t.path, type: 'body' });
   }
-}
-
-function inferCookies(source: any, target: any, deps: InferredDependency[]) {
+  
   const setCookie = getHeaderValue(source.response_headers, 'set-cookie');
-  const targetCookie = getHeaderValue(target.request_headers, 'cookie');
-
-  if (setCookie && targetCookie) {
-    // Very basic matching for demonstration
+  if (setCookie) {
     const setParts = setCookie.split(';')[0].split('=');
     if (setParts.length >= 2) {
-      const cookieName = setParts[0].trim();
-      const cookieVal = setParts[1].trim();
-      
-      if (targetCookie.includes(`${cookieName}=${cookieVal}`)) {
-        const cls = classifyToken(cookieVal, 'cookie');
-        let baseConf = 0.9;
-        deps.push({
-          sourceRequestId: source.id,
-          targetRequestId: target.id,
-          type: 'cookie',
-          confidence: Math.max(0.0, Math.min(1.0, baseConf + cls.confidence_modifier)),
-          evidence: { match_type: 'cookie', cookie_name: cookieName, classification: cls }
-        });
+      tokens.push({ value: setParts[1].trim(), path: `set-cookie:${setParts[0].trim()}`, type: 'header' });
+    }
+  }
+  
+  return tokens;
+}
+
+function extractTargetTokens(target: any): Array<{ value: string; type: string; path: string }> {
+  const tokens: Array<{ value: string; type: string; path: string }> = [];
+
+  const auth = getHeaderValue(target.request_headers, 'authorization');
+  if (auth && auth.toLowerCase().startsWith('bearer ')) {
+    const token = auth.substring(7).trim();
+    if (token.length >= 10) tokens.push({ value: token, type: 'token', path: 'Authorization' });
+  }
+
+  const cookieHeader = getHeaderValue(target.request_headers, 'cookie');
+  if (cookieHeader) {
+    const parts = cookieHeader.split(';');
+    for (const p of parts) {
+      const kv = p.split('=');
+      if (kv.length >= 2) {
+        const val = kv.slice(1).join('=').trim();
+        if (val.length > 8) tokens.push({ value: val, type: 'cookie', path: `cookie:${kv[0].trim()}` });
       }
     }
   }
-}
 
-function inferCsrfToken(source: any, target: any, deps: InferredDependency[]) {
-  const csrfHeader = getHeaderValue(target.request_headers, 'x-csrf-token') || getHeaderValue(target.request_headers, 'csrf-token');
-  if (csrfHeader && csrfHeader.length > 8) {
-    const sourceTokens = extractPotentialTokens(source.response_body, 'body');
-    for (const t of sourceTokens) {
-      if (t.value === csrfHeader) {
-        const cls = classifyToken(t.value, 'csrf');
-        let baseConf = 0.85;
-        deps.push({
-          sourceRequestId: source.id,
-          targetRequestId: target.id,
-          type: 'csrf',
-          confidence: Math.max(0.0, Math.min(1.0, baseConf + cls.confidence_modifier)),
-          evidence: { match_type: 'body_to_header', source_path: t.path, target_header: 'x-csrf-token', classification: cls }
-        });
-        return;
-      }
+  const csrf = getHeaderValue(target.request_headers, 'x-csrf-token') || getHeaderValue(target.request_headers, 'csrf-token');
+  if (csrf && csrf.length > 8) {
+    tokens.push({ value: csrf, type: 'csrf', path: 'x-csrf-token' });
+  }
+
+  if (target.path) {
+    const segments = target.path.split('/');
+    for (const s of segments) {
+      if (s.length > 8) tokens.push({ value: s, type: 'path_param', path: 'path' });
     }
   }
-}
 
-function inferPathParam(source: any, target: any, deps: InferredDependency[]) {
-  if (!target.path) return;
-  const sourceTokens = extractPotentialTokens(source.response_body, 'body');
-  for (const t of sourceTokens) {
-    // If target URL path contains this token (e.g. /users/123456789)
-    if (target.path.includes(t.value)) {
-      const cls = classifyToken(t.value, 'path');
-      let baseConf = 0.7; // Lower confidence due to accidental matches
-      deps.push({
-        sourceRequestId: source.id,
-        targetRequestId: target.id,
-        type: 'path_param',
-        confidence: Math.max(0.0, Math.min(1.0, baseConf + cls.confidence_modifier)),
-        evidence: { match_type: 'body_to_path', source_path: t.path, value: t.value, classification: cls }
-      });
-      return;
-    }
+  if (target.query_raw) {
+    const params = new URLSearchParams(target.query_raw);
+    params.forEach((val, key) => {
+      if (val.length > 8) tokens.push({ value: val, type: 'query_param', path: `query:${key}` });
+    });
   }
-}
 
-function inferQueryParam(source: any, target: any, deps: InferredDependency[]) {
-  if (!target.query_raw) return;
-  const sourceTokens = extractPotentialTokens(source.response_body, 'body');
-  
-  for (const t of sourceTokens) {
-    if (target.query_raw.includes(t.value)) {
-      const cls = classifyToken(t.value, 'query');
-      let baseConf = 0.75;
-      deps.push({
-        sourceRequestId: source.id,
-        targetRequestId: target.id,
-        type: 'query_param',
-        confidence: Math.max(0.0, Math.min(1.0, baseConf + cls.confidence_modifier)),
-        evidence: { match_type: 'body_to_query', source_path: t.path, value: t.value, classification: cls }
-      });
-      return;
-    }
-  }
-}
-
-function inferGraphQLVariable(source: any, target: any, deps: InferredDependency[]) {
-  if (!target.url?.includes('graphql') && !target.path?.includes('graphql')) return;
-  
-  const vars = extractPotentialTokens(target.request_body?.variables || {}, 'variables');
-  if (vars.length === 0) return;
-
-  const sourceTokens = extractPotentialTokens(source.response_body, 'body');
-  
-  for (const t of sourceTokens) {
+  if (target.url?.includes('graphql') || target.path?.includes('graphql')) {
+    const vars = extractPotentialTokens(target.request_body?.variables || {}, 'variables');
     for (const v of vars) {
-      if (t.value === v.value) {
-        const cls = classifyToken(t.value, 'graphql_var');
-        let baseConf = 0.85;
-        deps.push({
-          sourceRequestId: source.id,
-          targetRequestId: target.id,
-          type: 'graphql_var',
-          confidence: Math.max(0.0, Math.min(1.0, baseConf + cls.confidence_modifier)),
-          evidence: { match_type: 'body_to_gql_var', source_path: t.path, target_path: v.path, classification: cls }
-        });
-        return;
-      }
+      tokens.push({ value: v.value, type: 'graphql_var', path: v.path });
     }
   }
+
+  return tokens;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -199,27 +132,53 @@ function inferGraphQLVariable(source: any, target: any, deps: InferredDependency
 
 export function inferFromRequests(requests: any[]): InferredDependency[] {
   const deps: InferredDependency[] = [];
+  const indexer = new DependencyIndexer();
+  
+  for (const req of requests) {
+    const sources = extractSourceTokens(req);
+    indexer.indexSourceTokens(req, sources);
+  }
 
-  // O(N^2) backward comparison
-  for (let i = 0; i < requests.length; i++) {
-    const target = requests[i];
+  for (const target of requests) {
+    const targetTokens = extractTargetTokens(target);
     
-    for (let j = 0; j < i; j++) {
-      const source = requests[j];
+    for (const tt of targetTokens) {
+      const sources = indexer.lookup(target.session_id, tt.value);
       
-      // Limit to same session to avoid cross-pollination
-      if (source.session_id !== target.session_id) continue;
+      for (const src of sources) {
+        if (src.capturedAt !== undefined && target.captured_at !== undefined && src.capturedAt >= target.captured_at) continue;
 
-      inferAuthToken(source, target, deps);
-      inferCookies(source, target, deps);
-      inferCsrfToken(source, target, deps);
-      inferPathParam(source, target, deps);
-      inferQueryParam(source, target, deps);
-      inferGraphQLVariable(source, target, deps);
+        const cls = classifyToken(tt.value, tt.type);
+        
+        let baseConf = 0.8;
+        if (tt.type === 'token') baseConf = 0.95;
+        else if (tt.type === 'cookie') baseConf = 0.9;
+        else if (tt.type === 'csrf') baseConf = 0.85;
+        else if (tt.type === 'path_param') baseConf = 0.7;
+        else if (tt.type === 'query_param') baseConf = 0.75;
+        else if (tt.type === 'graphql_var') baseConf = 0.85;
+        
+        const confidence = indexer.calculateConfidence(baseConf, cls, src.capturedAt, target.captured_at, tt.value);
+        
+        deps.push({
+          sourceRequestId: src.sourceRequestId,
+          targetRequestId: target.id,
+          type: tt.type,
+          confidence,
+          evidence: {
+            match_type: `${src.sourceType}_to_${tt.type}`,
+            source_path: src.path,
+            target_path: tt.path,
+            classification: cls
+          }
+        });
+      }
     }
   }
 
-  // Deduplicate and filter dependencies
+  const metrics = indexer.getMetrics(requests.length);
+  recordIndexedInferenceMetrics(metrics);
+
   const uniqueDeps = new Map<string, InferredDependency>();
   for (const d of deps) {
     const key = `${d.sourceRequestId}:${d.targetRequestId}:${d.type}`;

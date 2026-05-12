@@ -44,3 +44,7 @@ export function emitReplayJobStatusChange(jobId: string, oldStatus: string, newS
     new_status: newStatus
   });
 }
+
+export function recordIndexedInferenceMetrics(metrics: any): void {
+  logEvent('replay.inference.indexed_metrics', metrics);
+}
