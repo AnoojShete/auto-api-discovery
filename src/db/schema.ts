@@ -20,7 +20,8 @@ let _db: Database.Database | null = null;
 
 /** Resolve the .apigen directory and ensure it exists */
 export function getApigenDir(): string {
-  const dir = path.resolve(process.cwd(), '.apigen');
+  const baseDir = process.env.APIGEN_CWD ?? process.cwd();
+  const dir = path.resolve(baseDir, '.apigen');
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
