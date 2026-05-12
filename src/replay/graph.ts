@@ -46,6 +46,36 @@ export class ReplayGraph {
     }
   }
 
+  public getNode(id: string): GraphNode | undefined {
+    return this.nodes.get(id);
+  }
+
+  public getNodes(): GraphNode[] {
+    return Array.from(this.nodes.values());
+  }
+
+  public getOutboundEdges(nodeId: string): GraphEdge[] {
+    return this.edges.get(nodeId) || [];
+  }
+
+  public getInboundEdges(nodeId: string): GraphEdge[] {
+    return this.reverseEdges.get(nodeId) || [];
+  }
+
+  public removeNode(nodeId: string) {
+    this.nodes.delete(nodeId);
+    this.edges.delete(nodeId);
+    this.reverseEdges.delete(nodeId);
+    
+    // Also remove any edge referencing this node
+    for (const [src, outs] of this.edges.entries()) {
+      this.edges.set(src, outs.filter(e => e.targetId !== nodeId));
+    }
+    for (const [tgt, ins] of this.reverseEdges.entries()) {
+      this.reverseEdges.set(tgt, ins.filter(e => e.sourceId !== nodeId));
+    }
+  }
+
   public addEdge(edge: GraphEdge) {
     if (!this.nodes.has(edge.sourceId)) this.addNode({ id: edge.sourceId, type: 'request' });
     if (!this.nodes.has(edge.targetId)) this.addNode({ id: edge.targetId, type: 'request' });
