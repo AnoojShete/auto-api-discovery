@@ -1,6 +1,6 @@
 {
   "name": "auto-api-discovery",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "Hybrid API discovery — intercept, infer, and reconstruct OpenAPI specs",
   "main": "dist/index.js",
   "bin": {
