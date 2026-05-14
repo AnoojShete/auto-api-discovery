@@ -23,6 +23,7 @@ import { registerStatsCommand } from './cli/stats';
 import { registerSessionsCommand } from './cli/sessions';
 import { registerResetCommand } from './cli/reset';
 import { registerMetricsCommand } from './cli/metrics';
+import { registerSummarizeCommand } from './cli/summarize';
 
 const program = new Command();
 
@@ -39,5 +40,6 @@ registerStatsCommand(program);
 registerSessionsCommand(program);
 registerResetCommand(program);
 registerMetricsCommand(program);
+registerSummarizeCommand(program);
 
 program.parse(process.argv);
