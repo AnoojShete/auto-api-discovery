@@ -206,21 +206,23 @@ export class ReplayGraph {
     for (const node of this.nodes.values()) {
       if (visited.has(node.id)) continue;
       const outs = this.edges.get(node.id) || [];
-      if (outs.some(e => e.dependencyType === 'token' || e.dependencyType === 'cookie')) {
+      const isAuthEdge = (e: GraphEdge) => ['token', 'cookie', 'session', 'authorization'].includes(e.dependencyType);
+      
+      if (outs.some(isAuthEdge) || node.type === 'auth') {
         const chain: string[] = [];
-        let current = node.id;
+        let current: string | undefined = node.id;
         while (current) {
           if (visited.has(current)) break;
           visited.add(current);
           chain.push(current);
-          const nextEdges = (this.edges.get(current) || []).filter(e => e.dependencyType === 'token' || e.dependencyType === 'cookie');
+          const nextEdges: GraphEdge[] = (this.edges.get(current) || []).filter(isAuthEdge);
           if (nextEdges.length > 0) {
              current = nextEdges[0].targetId;
           } else {
              break;
           }
         }
-        if (chain.length > 1) {
+        if (chain.length > 1 || node.type === 'auth') {
           chains.push(chain);
         }
       }

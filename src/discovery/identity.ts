@@ -28,7 +28,7 @@ export class IdentityResolver {
   }
 
   private computeTrustState(provenances: Set<string>): TrustState {
-    if (provenances.has('runtime_capture') || provenances.has('runtime_confirmed')) return 'observed';
+    if (provenances.has('runtime_capture') || provenances.has('runtime_confirmed') || provenances.has('network')) return 'observed';
     if (provenances.has('static_bundle') || provenances.has('source_map') || provenances.has('persisted_query')) return 'discovered';
     if (provenances.has('inferred_route') || provenances.has('inferred_operation')) return 'inferred';
     return 'unresolved';

@@ -28,15 +28,57 @@ export class WorkflowSynthesizer {
     const workflows: WorkflowModel[] = [];
     const components = this.graph.getConnectedComponents();
 
-    components.forEach((comp, idx) => {
-      const workflow = this.synthesizeComponent(comp, `wf_${idx + 1}`);
-      if (workflow) {
-        workflows.push(workflow);
+    const mergedComponents: string[][] = [];
+    const routeFamilyMap = new Map<string, string[]>();
+    const graphqlComponent: string[] = [];
+    const realtimeComponent: string[] = [];
+
+    // Group small fragments to reduce workflow over-fragmentation
+    components.forEach(comp => {
+      if (comp.length > 1) {
+        mergedComponents.push(comp);
+      } else {
+        let isGql = false;
+        let isWs = false;
+        let routeFamily = 'misc';
+        
+        for (const id of comp) {
+          const node = this.graph.getNode(id);
+          if (node?.type === 'graphql_operation') isGql = true;
+          if (node?.type === 'websocket') isWs = true;
+          if (node?.data?.path) {
+             const parts = node.data.path.split('/').filter(Boolean);
+             if (parts.length > 0) {
+               routeFamily = '/' + parts[0];
+             }
+          }
+        }
+        
+        if (isGql) {
+          graphqlComponent.push(...comp);
+        } else if (isWs) {
+          realtimeComponent.push(...comp);
+        } else {
+          if (!routeFamilyMap.has(routeFamily)) routeFamilyMap.set(routeFamily, []);
+          routeFamilyMap.get(routeFamily)!.push(...comp);
+        }
       }
     });
 
-    this.emitDiagnostics(workflows);
+    if (graphqlComponent.length > 0) mergedComponents.push(graphqlComponent);
+    if (realtimeComponent.length > 0) mergedComponents.push(realtimeComponent);
+    for (const nodes of routeFamilyMap.values()) {
+      if (nodes.length > 0) mergedComponents.push(nodes);
+    }
 
+    mergedComponents.forEach((comp, idx) => {
+      // Deduplicate node IDs just in case
+      const uniqueComp = Array.from(new Set(comp));
+      const workflow = this.synthesizeComponent(uniqueComp, `wf_${idx + 1}`);
+      if (workflow) workflows.push(workflow);
+    });
+
+    this.emitDiagnostics(workflows);
     return workflows;
   }
 
@@ -57,7 +99,9 @@ export class WorkflowSynthesizer {
     const authBoundaries = nodeIds.filter(id => {
       const node = this.graph.getNode(id);
       const url = (node?.data?.url || '').toLowerCase();
-      return node?.type === 'auth' || url.includes('login') || url.includes('auth') || url.includes('token');
+      const outs = this.graph.getOutboundEdges(id);
+      const providesAuth = outs.some(e => ['token', 'cookie', 'session', 'authorization'].includes(e.dependencyType));
+      return node?.type === 'auth' || providesAuth || url.includes('login') || url.includes('auth') || url.includes('token') || url.includes('logout');
     });
 
     // Cycle participation
@@ -95,6 +139,17 @@ export class WorkflowSynthesizer {
 
     // Deduplicate critical paths to be safe
     criticalPaths = Array.from(new Set(criticalPaths));
+
+    // Fallback if no explicit graph edges found to form a critical path
+    if (criticalPaths.length <= 1 && nodeIds.length > 1) {
+      const nonAuth = nodeIds.filter(id => !authBoundaries.includes(id));
+      if (nonAuth.length > 1) {
+        // synthesize a structural critical path from the top endpoints
+        criticalPaths = Array.from(new Set(nonAuth)).slice(0, Math.min(5, nonAuth.length));
+      } else {
+        criticalPaths = Array.from(new Set(nodeIds)).slice(0, Math.min(5, nodeIds.length));
+      }
+    }
 
     // Optional branches: nodes in component not in critical path
     const optionalBranches = nodeIds.filter(id => !criticalPaths.includes(id));
@@ -148,6 +203,18 @@ export class WorkflowSynthesizer {
     let hasGet = false;
     let hasPost = false;
     let hasDelete = false;
+    let hasPut = false;
+    let hasPagination = false;
+    let hasAuthEdge = false;
+
+    for (const id of nodeIds) {
+      const outs = this.graph.getOutboundEdges(id);
+      if (outs.some(e => ['token', 'cookie', 'session', 'authorization'].includes(e.dependencyType))) {
+         hasAuthEdge = true;
+      }
+    }
+
+    if (hasAuthEdge) return 'authentication';
 
     for (const id of nodeIds) {
       const node = this.graph.getNode(id);
@@ -156,17 +223,17 @@ export class WorkflowSynthesizer {
       const url = (node.data?.url || '').toLowerCase();
       const method = (node.data?.method || '').toUpperCase();
 
-      if (url.includes('login') || url.includes('auth') || url.includes('token') || node.type === 'auth') {
+      if (url.includes('login') || url.includes('auth') || url.includes('token') || url.includes('logout') || node.type === 'auth') {
         return 'authentication';
       }
-      if (url.includes('upload') || url.includes('file')) {
+      if (url.includes('upload') || url.includes('file') || url.includes('attachment')) {
         return 'upload';
       }
-      if (url.includes('admin')) {
+      if (url.includes('admin') || url.includes('dashboard')) {
         return 'admin';
       }
-      if (url.includes('limit=') || url.includes('offset=') || url.includes('page=')) {
-        return 'pagination';
+      if (url.includes('limit=') || url.includes('offset=') || url.includes('page=') || url.includes('cursor=')) {
+        hasPagination = true;
       }
       if (node.type === 'websocket' || url.startsWith('ws') || url.includes('stream')) {
         return 'realtime';
@@ -174,10 +241,12 @@ export class WorkflowSynthesizer {
       
       if (method === 'GET') hasGet = true;
       if (method === 'POST') hasPost = true;
-      if (method === 'DELETE' || method === 'PUT') hasDelete = true;
+      if (method === 'DELETE') hasDelete = true;
+      if (method === 'PUT' || method === 'PATCH') hasPut = true;
     }
 
-    if ((hasGet && hasPost) || hasDelete) {
+    if (hasPagination) return 'pagination';
+    if ((hasGet && (hasPost || hasPut)) || hasDelete || hasPut) {
       return 'CRUD';
     }
 
