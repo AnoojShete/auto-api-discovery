@@ -5,7 +5,7 @@
 import { randomUUID } from 'crypto';
 import { getDb } from './schema';
 
-export type ParseDiagnosticKind = 'request_body' | 'response_body' | 'graphql';
+export type ParseDiagnosticKind = 'request_body' | 'response_body' | 'graphql' | 'auth';
 
 export function recordParseDiagnostic(kind: ParseDiagnosticKind, url?: string, message?: string): void {
   const db = getDb();

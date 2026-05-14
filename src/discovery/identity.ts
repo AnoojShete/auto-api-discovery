@@ -108,13 +108,22 @@ export class IdentityResolver {
       existing.confidence = Math.max(existing.confidence, confidence);
       existing.isGraphQL = existing.isGraphQL || isGraphQL;
       
-      // Protocol conflicts
+      // Protocol upgrade logic: always prefer secure variants
       if (existing.protocolType === 'unknown' && protocol !== 'unknown') {
         existing.protocolType = protocol;
-      } else if (existing.protocolType !== 'unknown' && protocol !== 'unknown' && existing.protocolType !== protocol) {
+      } else if (protocol !== 'unknown' && existing.protocolType !== protocol) {
         logEvent('identity.protocol_conflict', { id, p1: existing.protocolType, p2: protocol });
-        if (protocol === 'https' || protocol === 'wss') {
-           existing.protocolType = protocol; // Upgrade to secure protocol
+        // Upgrade insecure -> secure: http->https, ws->wss
+        const secureProtocols: ProtocolType[] = ['https', 'wss'];
+        if (secureProtocols.includes(protocol)) {
+           existing.protocolType = protocol;
+        }
+        // Also upgrade if existing is http and new is https (or ws->wss)
+        if (existing.protocolType === 'http' && protocol === 'https') {
+          existing.protocolType = 'https';
+        }
+        if (existing.protocolType === 'ws' && protocol === 'wss') {
+          existing.protocolType = 'wss';
         }
       }
 

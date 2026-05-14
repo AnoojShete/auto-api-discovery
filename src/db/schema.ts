@@ -322,4 +322,10 @@ const MIGRATIONS: { name: string; sql: string }[] = [
       );
     `,
   },
+  {
+    name: '006_storage_state',
+    sql: `
+      ALTER TABLE sessions ADD COLUMN storage_state TEXT;
+    `,
+  },
 ];

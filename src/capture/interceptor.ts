@@ -45,12 +45,24 @@ function isApiRequest(url: string, resourceType: string): boolean {
  * Safely read response body. Can throw on binary/streaming responses — returns null on failure.
  * Caps body read at 500KB to prevent memory issues.
  */
+/** Check if a content-type header represents a JSON-like payload */
+function isJsonLikeContentType(contentType: string): boolean {
+  if (contentType.includes('application/json')) return true;
+  if (contentType.includes('application/graphql+json')) return true;
+  if (contentType.includes('application/problem+json')) return true;
+  if (contentType.includes('application/ld+json')) return true;
+  if (contentType.includes('text/')) return true;
+  // Catch any vendor/custom +json suffix (e.g. application/vnd.api+json)
+  if (/\+json/i.test(contentType)) return true;
+  return false;
+}
+
 async function safeBody(response: Response): Promise<{ text: string | null; size: number; truncated: boolean }> {
   try {
     const contentType = response.headers()['content-type'] || '';
 
-    // Only attempt to read JSON or text responses
-    if (!contentType.includes('application/json') && !contentType.includes('text/')) {
+    // Only attempt to read JSON-like or text responses
+    if (!isJsonLikeContentType(contentType)) {
       return { text: null, size: 0, truncated: false };
     }
 
@@ -112,12 +124,21 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
   const { sessionId, quiet = false, onCapture } = options;
 
   // Cache requests so we can correlate with responses
-  const requestTimestamps = new Map<string, { start: number; traceId: string }>();
+  // postData is cached eagerly here to prevent race conditions where
+  // fast responses arrive before postData() can be read
+  const requestTimestamps = new Map<string, { start: number; traceId: string; postData: string | null }>();
   const filterOptions = getFilterOptions();
 
   page.on('request', (req) => {
     const traceId = randomUUID();
-    requestTimestamps.set(req.url() + req.method(), { start: Date.now(), traceId });
+    // Eagerly capture postData in the request event — by the time the response
+    // fires, the request object's postData() may have already been GC'd or
+    // the underlying frame may be gone for fast requests.
+    let postDataEarly: string | null = null;
+    try {
+      postDataEarly = req.postData() || null;
+    } catch {}
+    requestTimestamps.set(req.url() + req.method(), { start: Date.now(), traceId, postData: postDataEarly });
     logEvent('request.start', {
       trace_id: traceId,
       method: req.method(),
@@ -148,8 +169,9 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
       const reqHeaders = request.headers();
       const resHeaders = response.headers();
 
-      // Read bodies safely
-      const postData = request.postData() || null;
+      // Read bodies safely — prefer the eagerly cached postData from the request event
+      const traceInfo = requestTimestamps.get(url + method);
+      const postData = traceInfo?.postData ?? request.postData() ?? null;
       const reqBody = tryParseJson(postData, 'request_body', url);
       const resBodyResult = await safeBody(response);
       if (resBodyResult.truncated) {
@@ -157,8 +179,7 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
       }
       const resBody = tryParseJson(resBodyResult.text, 'response_body', url);
 
-      // Calculate response time
-      const traceInfo = requestTimestamps.get(url + method);
+      // Calculate response time (traceInfo already read above)
       const responseTime = traceInfo ? Date.now() - traceInfo.start : null;
       const traceId = traceInfo?.traceId ?? randomUUID();
       requestTimestamps.delete(url + method);

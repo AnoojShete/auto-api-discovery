@@ -12,6 +12,7 @@ export interface SessionRecord {
   cookies?: string | null;
   local_storage?: string | null;
   label?: string | null;
+  storage_state?: string | null;
 }
 
 /** Create a new session and return its ID */
@@ -40,6 +41,36 @@ export function updateSessionStorage(id: string, storage: Record<string, string>
   const db = getDb();
   db.prepare('UPDATE sessions SET local_storage = ? WHERE id = ?')
     .run(JSON.stringify(storage), id);
+}
+
+/** Save full Playwright storageState (cookies + localStorage + sessionStorage) */
+export function saveStorageState(id: string, storageState: any): void {
+  const db = getDb();
+  db.prepare('UPDATE sessions SET storage_state = ? WHERE id = ?')
+    .run(JSON.stringify(storageState), id);
+}
+
+/** Load full Playwright storageState for context restoration */
+export function loadStorageState(label: string): any | null {
+  const session = getSessionByLabel(label);
+  if (!session?.storage_state) return null;
+  try {
+    return JSON.parse(session.storage_state);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Check if a session is likely still valid.
+ * Heuristic: sessions older than 24h are considered potentially expired.
+ */
+export function isSessionLikelyValid(label: string, maxAgeMs: number = 24 * 60 * 60 * 1000): boolean {
+  const session = getSessionByLabel(label);
+  if (!session) return false;
+  if (!session.storage_state && !session.cookies) return false;
+  const age = Date.now() - session.created_at;
+  return age < maxAgeMs;
 }
 
 /** Get session by ID */
