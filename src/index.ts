@@ -7,7 +7,8 @@
  * 
  * Commands:
  *   capture <url>       Interactive capture with browser
- *   crawl <url>         Headless BFS crawl with interception
+ *   crawl <url>         Persistent-profile BFS crawl with interception
+ *   attach              Attach to an already-running Chrome instance
  *   export <outfile>    Export OpenAPI 3.0 specification
  *   stats              Show database summary
  *   sessions list      List saved sessions
@@ -24,6 +25,7 @@ import { registerSessionsCommand } from './cli/sessions';
 import { registerResetCommand } from './cli/reset';
 import { registerMetricsCommand } from './cli/metrics';
 import { registerSummarizeCommand } from './cli/summarize';
+import { registerAttachCommand } from './cli/attach';
 
 const program = new Command();
 
@@ -41,5 +43,6 @@ registerSessionsCommand(program);
 registerResetCommand(program);
 registerMetricsCommand(program);
 registerSummarizeCommand(program);
+registerAttachCommand(program);
 
 program.parse(process.argv);

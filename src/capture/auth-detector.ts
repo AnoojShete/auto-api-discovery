@@ -219,3 +219,37 @@ export async function detectAuthBoundary(
 
   return null;
 }
+
+/**
+ * Checks if a given URL is a known authentication route that should be excluded
+ * from autonomous crawling post-authentication.
+ */
+export function isAuthRoute(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.toLowerCase();
+
+    // Common auth paths
+    if (
+      path.includes('/login') ||
+      path.includes('/signin') ||
+      path.includes('/sign-in') ||
+      path.includes('/logout') ||
+      path.includes('/signout') ||
+      path.includes('/register') ||
+      path.includes('/signup') ||
+      path.includes('/auth') ||
+      path.includes('/oauth') ||
+      path.includes('/sso') ||
+      path.includes('/challenge') ||
+      path.includes('/captcha')
+    ) {
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+

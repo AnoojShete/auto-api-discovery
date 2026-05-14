@@ -6,7 +6,7 @@
  */
 
 import { Command } from 'commander';
-import { chromium } from 'playwright';
+import { Browser, BrowserContext, Page } from 'playwright';
 import chalk from 'chalk';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -18,6 +18,11 @@ import { getRequestCount } from '../db/requests';
 import { getWsSessionCount, getWsFrameCount } from '../capture/websocket';
 import { getGqlOperationCount } from '../capture/graphql';
 import { getSseStreamCount } from '../capture/sse';
+import {
+  launchRealisticBrowser,
+  getRealisticContextOptions,
+  applyRealismToContext,
+} from '../capture/realism';
 
 export function registerCaptureCommand(program: Command): void {
   program
@@ -33,8 +38,9 @@ export function registerCaptureCommand(program: Command): void {
       console.log(chalk.gray('  Close the browser window to stop capture.\n'));
 
       try {
-        const browser = await chromium.launch({ headless: false });
-        const context = await browser.newContext();
+        const browser = await launchRealisticBrowser(true);
+        const context = await browser.newContext(getRealisticContextOptions());
+        await applyRealismToContext(context);
         const page = await context.newPage();
 
         // Create session in database

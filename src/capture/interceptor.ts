@@ -117,11 +117,32 @@ export interface CapturedRequest {
 }
 
 /**
+ * Controller returned by attachInterceptor to allow pausing/resuming
+ * response body extraction during HITL auth flows.
+ */
+export interface InterceptorController {
+  /** Pause response body extraction (passive request tracking continues) */
+  pause(): void;
+  /** Resume full interception */
+  resume(): void;
+  /** Whether body extraction is currently paused */
+  isPaused(): boolean;
+}
+
+/**
  * Attach the passive network interceptor to a Playwright page.
  * Non-blocking — uses event listeners, not route interception.
  */
-export function attachInterceptor(page: Page, options: InterceptorOptions): void {
+export function attachInterceptor(page: Page, options: InterceptorOptions): InterceptorController {
   const { sessionId, quiet = false, onCapture } = options;
+
+  // Pause state for HITL flows
+  let _paused = false;
+  const controller: InterceptorController = {
+    pause() { _paused = true; },
+    resume() { _paused = false; },
+    isPaused() { return _paused; },
+  };
 
   // Cache requests so we can correlate with responses
   // postData is cached eagerly here to prevent race conditions where
@@ -155,6 +176,11 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
     // Filter: OPTIONS, non-API, noise
     if (method === 'OPTIONS') return;
     if (!isApiRequest(url, resourceType)) return;
+
+    // When paused (HITL active), skip body extraction and DB writes
+    // to avoid navigation/CDP race conditions during manual auth.
+    // Passive request tracking (timestamps) continues above.
+    if (_paused) return;
 
     const origin = request.frame()?.url() || undefined;
     const telemetryDecision = shouldDropTelemetry(url, filterOptions, origin);
@@ -277,4 +303,6 @@ export function attachInterceptor(page: Page, options: InterceptorOptions): void
       logEvent('request.error', { message: (err as any)?.message || 'unknown_error' }, 'error');
     }
   });
+
+  return controller;
 }
