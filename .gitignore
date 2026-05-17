@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+apigen.db
+apigen.db-shm
+apigen.db-wal
+.apigen-session.json
+update.xml
+repomix-output.xml
+public/
+tools/
